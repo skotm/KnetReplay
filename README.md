@@ -1,10 +1,6 @@
 # knet-replay-site
-
-MeteoQuake-KyoshinViewer用、NIED K-NET/KiK-net生波形データからリプレイファイルを
-生成するブラウザ完結型サイト(GitHub Pagesでそのまま動く、ビルド不要)。
-
-`knet-replay`(Node CLI版)と同じロジックだが、こちらは**すべての処理がブラウザ内で
-完結**する。ファイルはどこにも送信されない。
+> [!CAUTION]
+> 本ツールは防災科学技術研究所（NIED）の強震データ（K-NET/KiK-net等）を[MeteoQuake-KyoshinViewer](https://github.com/skotm/MeteoQuake-KyoshinViewer) のリプレイファイルのフォーマットに変換するためのものです。データの利用にあたってはNIEDの利用規約に従い、データの二次配布は行わないでください。また、成果物公開時はDOIを明記してください。
 
 ## 使い方(サイト側)
 1. K-NET ASCIIファイル(1観測点につきNS/EW/UD3つ)をドラッグ&ドロップまたは選択
