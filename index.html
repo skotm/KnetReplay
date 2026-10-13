@@ -145,6 +145,21 @@
     <option value="max" selected>最大の震度を採用</option>
     <option value="earliest">開始時刻が最も早いファイルの値を採用</option>
   </select>
+  <label for="gapMode" style="margin-top: 14px;">ファイル間の空白(同じ観測点の記録が途切れる区間)</label>
+  <select id="gapMode">
+    <option value="none" selected>埋めない(空白で消え、空白後に再び現れる)</option>
+    <option value="linear">直線補間で埋める</option>
+    <option value="hold">直前の値を保持して埋める</option>
+  </select>
+  <label for="gapMaxSec">埋める空白の最大の長さ(秒、補間する場合のみ)</label>
+  <input type="number" id="gapMaxSec" value="60" min="1">
+  <div class="small-note">
+    K-NETは観測点ごとにトリガー式で記録するため、1つ目の地震の記録が終わってから2つ目の
+    記録が始まるまでの間(M6.1→M7.4の例では平均約19秒)、同じ観測点でも未収録の空白が
+    できます。既定では空白を埋めず、観測点はその間だけ「データ無し」で消え、次のファイルの
+    記録が始まった時点で再び現れます。補間を選んだ場合、補間値は<b>実測値ではありません</b>
+    (最大の長さを超える空白と、1つのファイル内で元々途切れている区間は補いません)。
+  </div>
   <div class="small-note">
     リプレイファイルは差分形式のため、各ファイルを時刻ごとの全観測点の状態に復元して合成し、
     差分に再エンコードします。各ファイルの観測点は、そのファイル自身の時刻範囲内でのみ有効です
