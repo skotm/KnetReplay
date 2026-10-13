@@ -343,7 +343,7 @@ function formatJst(unixSec) {
     `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
-async function processMerge(files, conflict) {
+async function processMerge(files, conflict, gapFill) {
   $("log").textContent = "";
   setProgress(0);
   $("downloadBtn").style.display = "none";
@@ -379,7 +379,7 @@ async function processMerge(files, conflict) {
 
   setProgress(60);
   await new Promise((r) => setTimeout(r, 0)); // 進捗表示を更新させる
-  const { bytes, info } = mergeReplays(decoded, { conflict });
+  const { bytes, info } = mergeReplays(decoded, { conflict, gapFill });
   setProgress(100);
 
   log(`\n結合完了: ${decoded.length}ファイル → ${info.frameCount}フレーム, ${info.stationCount}観測点, ${bytes.byteLength}バイト`);
@@ -388,6 +388,20 @@ async function processMerge(files, conflict) {
     log(`同一観測点の重複: ${info.conflictCount}件(${conflict === "max" ? "最大値を採用" : "最も早いファイルの値を採用"})`);
   } else {
     log("同一観測点の重複: なし");
+  }
+  const rp = info.reappear;
+  if (rp.stationCount > 0) {
+    log(`再出現する観測点: ${rp.stationCount}観測点(ファイルの切り替わりで一度消え、次の記録開始で再び現れる。空白は最長${rp.longestSec}秒)`);
+  } else {
+    log("再出現する観測点: なし(ファイルをまたいで途切れる観測点はありません)");
+  }
+  const gf = info.gapFill;
+  if (gf.method === "none") {
+    log("ファイル間の空白の補間: しない");
+  } else if (gf.gapCount === 0) {
+    log(`ファイル間の空白の補間: 対象なし(${gf.maxSec}秒以下の空白は見つかりませんでした)`);
+  } else {
+    log(`ファイル間の空白の補間(${gf.method === "linear" ? "直線補間" : "直前の値を保持"}): ${gf.stationCount}観測点・${gf.gapCount}区間(最長${gf.longestSec}秒)、補間値${gf.filledSamples}点`);
   }
 
   return {
@@ -447,7 +461,10 @@ $("processBtn").addEventListener("click", async () => {
   $("processBtn").disabled = true;
   try {
     if (merge) {
-      lastResult = await processMerge([...files], $("conflictMode").value);
+      lastResult = await processMerge([...files], $("conflictMode").value, {
+        method: $("gapMode").value,
+        maxSec: Number($("gapMaxSec").value) || 60,
+      });
       if (lastResult) $("fileName").value = lastResult.fileNameBase;
     } else {
       const windowSec = Number($("windowSec").value) || 10;
