@@ -14,6 +14,7 @@
  *  - 重い計算(FFTフィルタ)は引き続きWeb Worker上で実行し、UIの応答性を保つ
  */
 import { parseKnetAscii } from "./knetAsciiParser.js";
+import { normalizeDirection } from "./knetDirection.js";
 import { encodeIntensityDelta, diffIntensityMaps } from "./protocolEncode.js";
 import { loadKmoniObsPointsByCode } from "./kmoniObsPoints.js";
 import { decodeReplay, checkOverlap, mergeReplays } from "./replayMerge.js";
@@ -34,27 +35,6 @@ function parseJstDateTime(str) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) throw new Error(`日時の形式が不正です: "${str}"`);
   return d;
-}
-
-/**
- * 方向(Dir.)欄を解釈する。
- * K-NET(表層のみ): "N-S" / "E-W" / "U-D" のような文字列
- * KiK-net(表層+地中ペア): 数値コード 1〜6
- *   1=NS(表層) 2=EW(表層) 3=UD(表層) 4=NS(地中) 5=EW(地中) 6=UD(地中)
- * @returns {{axis: "NS"|"EW"|"UD", placement: "surface"|"borehole"} | null}
- */
-function normalizeDirection(raw) {
-  const trimmed = raw.trim();
-  const numericCode = { "1": ["NS", "surface"], "2": ["EW", "surface"], "3": ["UD", "surface"], "4": ["NS", "borehole"], "5": ["EW", "borehole"], "6": ["UD", "borehole"] };
-  if (numericCode[trimmed]) {
-    const [axis, placement] = numericCode[trimmed];
-    return { axis, placement };
-  }
-  const s = trimmed.toUpperCase().replace(/[-\s]/g, "");
-  if (s.includes("NS") || s === "N") return { axis: "NS", placement: "surface" };
-  if (s.includes("EW") || s === "E") return { axis: "EW", placement: "surface" };
-  if (s.includes("UD") || s.includes("VERT") || s === "U") return { axis: "UD", placement: "surface" };
-  return null;
 }
 
 function looksLikeIrrelevantEntry(name) {
@@ -139,6 +119,8 @@ async function processAll(files, windowSec, stepSec, filterType) {
   let firstHeader = null;
   let dispatchedCount = 0;
   let skippedCount = 0;
+  let skippedBoreholeCount = 0; // KiK-netの地中(ch1〜3)のファイル数
+  let kiknetSurfaceFileCount = 0; // KiK-netの地表(ch4〜6)のファイル数
 
   function tryDispatch(code) {
     const comp = pendingGroups.get(code);
@@ -207,12 +189,17 @@ async function processAll(files, windowSec, stepSec, filterType) {
     }
     text = null;
 
-    const dirInfo = normalizeDirection(parsed.header.direction);
+    const dirInfo = normalizeDirection(parsed.header.direction, name);
     if (!dirInfo) {
       log(`✗ ${name}: 方向(Dir.)を認識できません ("${parsed.header.direction}")`);
       return;
     }
-    if (dirInfo.placement === "borehole") return;
+    if (dirInfo.placement === "borehole") {
+      // KiK-netの地中(ch1〜3)は使わない。地表(ch4〜6)だけで計算する
+      skippedBoreholeCount++;
+      return;
+    }
+    if (dirInfo.channel !== null) kiknetSurfaceFileCount++;
 
     const code = parsed.header.stationCode;
     if (!pendingGroups.has(code)) pendingGroups.set(code, {});
@@ -257,6 +244,9 @@ async function processAll(files, windowSec, stepSec, filterType) {
     }
   }
 
+  if (skippedBoreholeCount > 0 || kiknetSurfaceFileCount > 0) {
+    log(`\nKiK-net: 地表(ch4〜6)${kiknetSurfaceFileCount}ファイルを使用、地中(ch1〜3)${skippedBoreholeCount}ファイルは使用しません`);
+  }
   log(`\n${dispatchedCount}観測点をWorker(${WORKER_POOL_SIZE}並列)へディスパッチしました。処理完了を待っています...`);
   log(`使用フィルタ: ${filterType === "kunugi2012" ? "2012フィルタ(強震モニタ相当)" : "気象庁フィルタ(FFTベース厳密)"}`);
   setProgress(75);
