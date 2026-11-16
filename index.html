@@ -190,6 +190,16 @@
       <input type="number" id="stepSec" value="1" min="1">
     </div>
   </div>
+  <div class="row">
+    <div>
+      <label for="preEventSec">波形の先頭が Record Time より前の秒数(プリイベント)</label>
+      <input type="number" id="preEventSec" value="15" min="0" step="0.5">
+    </div>
+  </div>
+  <div class="small-note">
+    K-NET/KiK-netの波形は、ヘッダーの Record Time(トリガー時刻)より<b>15秒前</b>から始まります。
+    この値を引いて時刻を付けます(0にすると、全体が15秒遅れます)。
+  </div>
   <div class="small-note">
     震度の時間変化(アニメーション)を作るための、本ツール独自のスライディングウィンドウ
     パラメータです(気象庁の公式仕様そのものではありません)。ウィンドウを短くすると

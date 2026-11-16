@@ -103,7 +103,7 @@ class WorkerPool {
 /* ─────────────────────────────────────────────
    メイン処理: ストリーミング方式
    ───────────────────────────────────────────── */
-async function processAll(files, windowSec, stepSec, filterType) {
+async function processAll(files, windowSec, stepSec, filterType, preEventSec = 15) {
   $("log").textContent = "";
   setProgress(0);
   $("downloadBtn").style.display = "none";
@@ -153,7 +153,9 @@ async function processAll(files, windowSec, stepSec, filterType) {
         ew: comp.EW.accelerationGal,
         ud: comp.UD.accelerationGal,
         sampleRateHz,
-        recordTimeMs: recordStart.getTime(),
+        // K-NET/KiK-netの波形は、ヘッダーの Record Time(トリガー時刻)の preEventSec 秒前から始まる。
+        // 先頭サンプルの時刻 = Record Time − preEventSec。これを引かないと、全体が preEventSec 秒遅れる。
+        recordTimeMs: recordStart.getTime() - preEventSec * 1000,
         windowSec,
         stepSec,
         filterType,
@@ -460,7 +462,8 @@ $("processBtn").addEventListener("click", async () => {
       const windowSec = Number($("windowSec").value) || 10;
       const stepSec = Number($("stepSec").value) || 1;
       const filterType = $("filterType").value;
-      lastResult = await processAll(files, windowSec, stepSec, filterType);
+      const preEventSec = $("preEventSec").value === "" ? 15 : Number($("preEventSec").value);
+      lastResult = await processAll(files, windowSec, stepSec, filterType, preEventSec);
       if (lastResult) $("fileName").value = suggestFileName(lastResult.header);
     }
     if (lastResult) $("downloadBtn").style.display = "inline-block";
