@@ -103,7 +103,7 @@ class WorkerPool {
 /* ─────────────────────────────────────────────
    メイン処理: ストリーミング方式
    ───────────────────────────────────────────── */
-async function processAll(files, windowSec, stepSec, filterType, preEventSec = 15) {
+async function processAll(files, windowSec, stepSec, filterType, preEventSec = 15, holdAfterEnd = true) {
   $("log").textContent = "";
   setProgress(0);
   $("downloadBtn").style.display = "none";
@@ -122,11 +122,12 @@ async function processAll(files, windowSec, stepSec, filterType, preEventSec = 1
   let skippedBoreholeCount = 0; // KiK-netの地中(ch1〜3)のファイル数
   let kiknetSurfaceFileCount = 0; // KiK-netの地表(ch4〜6)のファイル数
 
-  function tryDispatch(code) {
-    const comp = pendingGroups.get(code);
+  function tryDispatch(key) {
+    const comp = pendingGroups.get(key);
     if (!comp.NS || !comp.EW || !comp.UD) return; // まだ3成分揃っていない
 
-    pendingGroups.delete(code); // メモリ解放(以後この観測点の生データはWorker側にのみ存在)
+    pendingGroups.delete(key);
+    const code = comp.NS.header.stationCode; // メモリ解放(以後この観測点の生データはWorker側にのみ存在)
 
     const sampleRateHz = comp.NS.header.samplingFreqHz;
     if (comp.EW.header.samplingFreqHz !== sampleRateHz || comp.UD.header.samplingFreqHz !== sampleRateHz) {
@@ -203,10 +204,13 @@ async function processAll(files, windowSec, stepSec, filterType, preEventSec = 1
     }
     if (dirInfo.channel !== null) kiknetSurfaceFileCount++;
 
+    // 観測点コード + Record Time をキーにする。複数のファイル/zipに同じ観測点の別イベントが
+    // 含まれていても、成分が混ざったり上書きされたりしない。
     const code = parsed.header.stationCode;
-    if (!pendingGroups.has(code)) pendingGroups.set(code, {});
-    pendingGroups.get(code)[dirInfo.axis] = parsed;
-    tryDispatch(code);
+    const key = `${code}|${parsed.header.recordTime}`;
+    if (!pendingGroups.has(key)) pendingGroups.set(key, {});
+    pendingGroups.get(key)[dirInfo.axis] = parsed;
+    tryDispatch(key);
   }
 
   let fileCounter = 0;
@@ -239,8 +243,9 @@ async function processAll(files, windowSec, stepSec, filterType, preEventSec = 1
   }
 
   if (pendingGroups.size > 0) {
-    for (const code of [...pendingGroups.keys()]) {
-      const missing = ["NS", "EW", "UD"].filter((d) => !pendingGroups.get(code)[d]);
+    for (const key of [...pendingGroups.keys()]) {
+      const code = key.split("|")[0];
+      const missing = ["NS", "EW", "UD"].filter((d) => !pendingGroups.get(key)[d]);
       log(`✗ ${code}: 3成分が揃いませんでした(不足: ${missing.join(", ")})`);
       skippedCount++;
     }
@@ -274,14 +279,31 @@ async function processAll(files, windowSec, stepSec, filterType, preEventSec = 1
   }
   const sortedTimestamps = [...allTimestampsMs].sort((a, b) => a - b);
 
+  // 同じ観測点(obsId)の系列が複数あっても上書きせず統合する(同時刻は大きい方を採用)
   const valueByStationAndTime = new Map();
   for (const st of stations) {
-    const m = new Map();
+    let m = valueByStationAndTime.get(st.obsId);
+    if (!m) {
+      m = new Map();
+      valueByStationAndTime.set(st.obsId, m);
+    }
     for (const pt of st.series) {
       const roundedMs = Math.round(pt.timeMs / (stepSec * 1000)) * (stepSec * 1000);
-      m.set(roundedMs, pt.intensity);
+      const old = m.get(roundedMs);
+      if (old === undefined || pt.intensity > old) m.set(roundedMs, pt.intensity);
     }
-    valueByStationAndTime.set(st.obsId, m);
+  }
+  const obsIds = [...valueByStationAndTime.keys()];
+
+  // 記録が先に終わった観測点は、そのままだと「消去」扱いになり欠落して見える。
+  // 既定では最後の値を最終時刻まで保持する。
+  const lastTsByStation = new Map();
+  const lastValByStation = new Map();
+  for (const [id, m] of valueByStationAndTime) {
+    let lt = -Infinity;
+    for (const t of m.keys()) if (t > lt) lt = t;
+    lastTsByStation.set(id, lt);
+    lastValByStation.set(id, m.get(lt));
   }
 
   const frames = [];
@@ -290,9 +312,10 @@ async function processAll(files, windowSec, stepSec, filterType, preEventSec = 1
 
   for (const ts of sortedTimestamps) {
     const currentValues = new Map();
-    for (const st of stations) {
-      const v = valueByStationAndTime.get(st.obsId).get(ts);
-      if (v !== undefined) currentValues.set(st.obsId, v);
+    for (const id of obsIds) {
+      let v = valueByStationAndTime.get(id).get(ts);
+      if (v === undefined && holdAfterEnd && ts > lastTsByStation.get(id)) v = lastValByStation.get(id);
+      if (v !== undefined) currentValues.set(id, v);
     }
 
     const time = new Date(ts);
@@ -320,9 +343,9 @@ async function processAll(files, windowSec, stepSec, filterType, preEventSec = 1
   }
 
   setProgress(100);
-  log(`\n完了: ${stations.length}観測点(スキップ${skippedCount}件), ${frames.length}フレーム, ${merged.byteLength}バイト`);
+  log(`\n完了: ${obsIds.length}観測点(スキップ${skippedCount}件), ${frames.length}フレーム, ${merged.byteLength}バイト`);
 
-  return { blob: new Blob([merged], { type: "application/octet-stream" }), header: firstHeader, stationCount: stations.length };
+  return { blob: new Blob([merged], { type: "application/octet-stream" }), header: firstHeader, stationCount: obsIds.length };
 }
 
 /* ─────────────────────────────────────────────
@@ -463,7 +486,7 @@ $("processBtn").addEventListener("click", async () => {
       const stepSec = Number($("stepSec").value) || 1;
       const filterType = $("filterType").value;
       const preEventSec = $("preEventSec").value === "" ? 15 : Number($("preEventSec").value);
-      lastResult = await processAll(files, windowSec, stepSec, filterType, preEventSec);
+      lastResult = await processAll(files, windowSec, stepSec, filterType, preEventSec, $("holdAfterEnd").checked);
       if (lastResult) $("fileName").value = suggestFileName(lastResult.header);
     }
     if (lastResult) $("downloadBtn").style.display = "inline-block";
